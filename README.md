@@ -43,3 +43,7 @@ P : Take Image
 W : Toggle Temperature Conversion
 Q : quit
 ```
+
+# TODO
+
+* abandon this and rewrite in Go 🤣🤣🤣 
