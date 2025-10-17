@@ -34,17 +34,36 @@ scale = 3
 nw = width * scale
 nh = height * scale
 alpha = 1.0  # Contrast control (1.0-3.0)
-colormap = 0
+colormap = 1
 font = cv2.FONT_HERSHEY_SIMPLEX
 dispFullscreen = False
+rotate_mode = 270
+
+def get_rotate_code_and_size():
+    """Gibt OpenCV-Rotate-Code (oder None) sowie Display-(w,h) zurück."""
+    if rotate_mode == 0:
+        return None, (nw, nh)
+    elif rotate_mode == 90:
+        return cv2.ROTATE_90_CLOCKWISE, (nh, nw)
+    elif rotate_mode == 180:
+        return cv2.ROTATE_180, (nw, nh)
+    elif rotate_mode == 270:
+        return cv2.ROTATE_90_COUNTERCLOCKWISE, (nh, nw)
+    else:
+        return None, (nw, nh)
+
+rotate_code, (display_w, display_h) = get_rotate_code_and_size()
+
 cv2.namedWindow('Thermal', cv2.WINDOW_GUI_NORMAL)
-cv2.resizeWindow('Thermal', nw, nh)
+cv2.resizeWindow('Thermal', display_w, display_h)
+
 threshold = 2
-hud = False
+hud = True
 recording = False
 elapsed = "00:00:00"
 snaptime = "None"
-tempConvert = True
+tempConvert = False
+
 white = (255, 255, 255)
 red = (80, 80, 255)
 green = (0, 255, 0)
@@ -57,11 +76,9 @@ text_shadow_thickness = 3
 display_crosshair = True
 crosshair_thickness = 2
 
-def rec():
+def rec(w, h):
     now = time.strftime("%Y%m%d--%H%M%S")
-    video_out = cv2.VideoWriter(now + 'output.avi', cv2.VideoWriter_fourcc(*'XVID'), 25, (nw, nh))
-    return video_out
-
+    return cv2.VideoWriter(now + 'output.avi', cv2.VideoWriter_fourcc(*'XVID'), 25, (w, h))
 
 # tc() : Temperature conversion
 def tc(c):
@@ -70,18 +87,17 @@ def tc(c):
     else:
         return "{:.2f} C".format(c)
 
-
-def snapshot(heatmap):
-    # I would put colons in here, but it Win throws a fit if you try and open them!
+def snapshot(img_bgr):
     now = time.strftime("%Y%m%d-%H%M%S")
     snap_time = time.strftime("%H:%M:%S")
-    cv2.imwrite("TC001" + now + ".png", heatmap)
+    cv2.imwrite("TC001" + now + ".png", img_bgr)
     return snap_time
 
 
 def osm(pos):
     print("on-screen menu", pos)
 
+last_display_frame = None
 
 while cap.isOpened():
     ret, frame = cap.read()
@@ -160,8 +176,6 @@ while cap.isOpened():
                 cmapText = 'Cividis'
 
         colorMapsLen = 11  # last colormap number + 1
-        # UNUSED COLORMAPS
-        # [COLORMAP_HSV, COLORMAP_SUMMER, COLORMAP_WINTER, COLORMAP_TWILIGHT, COLORMAP_PARULA, COLORMAP_COOL, COLORMAP_PINK, COLORMAP_MAGMA]
 
         # draw crosshairs
         if display_crosshair:
@@ -169,106 +183,157 @@ while cap.isOpened():
             cv2.line(heatmap, (int(nw / 2) + 20, int(nh / 2)), (int(nw / 2) - 20, int(nh / 2)), textColor, crosshair_thickness)  # hline
             cv2.line(heatmap, (int(nw / 2), int(nh / 2) + 20), (int(nw / 2), int(nh / 2) - 20), black, 1)  # vline
             cv2.line(heatmap, (int(nw / 2) + 20, int(nh / 2)), (int(nw / 2) - 20, int(nh / 2)), black, 1)  # hline
-            cv2.putText(heatmap, tc(temp), (nw - 77, nh - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.45, black, text_shadow_thickness, cv2.LINE_AA)
-            cv2.putText(heatmap, tc(temp), (nw - 77, nh - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.45, textColor, 1, cv2.LINE_AA)
-
-        if recording:
-            cv2.putText(heatmap, "Rec: " + elapsed, (nw - 100, 10), cv2.FONT_HERSHEY_SIMPLEX, 0.4, black, 2, cv2.LINE_AA)
-            cv2.putText(heatmap, "Rec: " + elapsed, (nw - 100, 10), cv2.FONT_HERSHEY_SIMPLEX, 0.4, textColor, 1, cv2.LINE_AA)
 
         if hud:
-            cv2.putText(heatmap, 'Avg: ' + tc(avgTemp), (10, 14), cv2.FONT_HERSHEY_SIMPLEX, 0.4, textColor, 1, cv2.LINE_AA)
-            cv2.putText(heatmap, cmapText, (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.4, textColor, 1, cv2.LINE_AA)
-            cv2.putText(heatmap, 'Scaling: ' + str(scale) + ' ', (10, 42), cv2.FONT_HERSHEY_SIMPLEX, 0.4, textColor, 1, cv2.LINE_AA)
-            cv2.putText(heatmap, 'Contrast: ' + str(alpha) + ' ', (10, 56), cv2.FONT_HERSHEY_SIMPLEX, 0.4, textColor, 1, cv2.LINE_AA)
-            cv2.putText(heatmap, 'Snapshot: ' + snaptime + ' ', (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.4, textColor, 1, cv2.LINE_AA)
-            # display floating max temp
+            # floating max/min marker (Punkte + Werte), die mit der Szene “mitgehen”
             if maxtemp > avgTemp + threshold:
                 # TODO : get actual highest value
                 cv2.circle(heatmap, (mrow * scale, mcol * scale), 2, black, 2)
                 cv2.circle(heatmap, (mrow * scale, mcol * scale), 2, red, -1)
-                cv2.putText(heatmap, tc(maxtemp), ((mrow * scale) + 10, (mcol * scale) + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.45, black, text_shadow_thickness, cv2.LINE_AA)
-                cv2.putText(heatmap, tc(maxtemp), ((mrow * scale) + 10, (mcol * scale) + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.45, textColor, 1, cv2.LINE_AA)
-            # display floating min temp
             if mintemp < avgTemp - threshold:
                 cv2.circle(heatmap, (lrow * scale, lcol * scale), 2, white, 2)
                 cv2.circle(heatmap, (lrow * scale, lcol * scale), 2, blue, -1)
-                cv2.putText(heatmap, tc(mintemp), ((lrow * scale) + 10, (lcol * scale) + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.45, black, text_shadow_thickness, cv2.LINE_AA)
-                cv2.putText(heatmap, tc(mintemp), ((lrow * scale) + 10, (lcol * scale) + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.45, textColor, 1, cv2.LINE_AA)
 
-        # display image
-        cv2.imshow('Thermal', heatmap)
+        # ---------- 2) Jetzt BILD rotieren ----------
+        display_frame = heatmap
+        if rotate_code is not None:
+            display_frame = cv2.rotate(heatmap, rotate_code)
+
+        # ---------- 3) HUD-Texte/Recorder-Timer NACH der Rotation zeichnen ----------
+        # => bleiben lesbar / nicht gedreht
+        if hud:
+            cv2.putText(display_frame, 'Avg: ' + tc(avgTemp), (10, 14), cv2.FONT_HERSHEY_SIMPLEX, 0.4, textColor, 1, cv2.LINE_AA)
+            cv2.putText(display_frame, cmapText, (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.4, textColor, 1, cv2.LINE_AA)
+            cv2.putText(display_frame, 'Scaling: ' + str(scale) + ' ', (10, 42), cv2.FONT_HERSHEY_SIMPLEX, 0.4, textColor, 1, cv2.LINE_AA)
+            cv2.putText(display_frame, 'Contrast: ' + str(alpha) + ' ', (10, 56), cv2.FONT_HERSHEY_SIMPLEX, 0.4, textColor, 1, cv2.LINE_AA)
+            cv2.putText(display_frame, 'Snapshot: ' + snaptime + ' ', (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.4, textColor, 1, cv2.LINE_AA)
+
+            # Max/Min-Temperaturwerte neben den Markern: Positionen müssen in die gedrehte
+            # Ansicht transformiert werden. Für 0°/180° bleiben x,y gleich bzw. werden gespiegelt.
+            # Da wir 180° nutzen, können wir die Textplatzierung einfach erneut berechnen:
+            if maxtemp > avgTemp + threshold:
+                # Marker-Koordinate im ursprünglichen (nw x nh):
+                px, py = (mrow * scale), (mcol * scale)
+                if rotate_mode == 0:
+                    tx, ty = px + 10, py + 5
+                elif rotate_mode == 180:
+                    tx, ty = (display_w - px) + 10 - nw, (display_h - py) + 5 - nh
+                elif rotate_mode == 90:
+                    # (x,y) -> (y', x') Mapping bei 90° CW: (x,y) -> (h-1-y, x)
+                    tx, ty = (nh - 1 - py) + 10, px + 5
+                elif rotate_mode == 270:
+                    # 270° CW (90° CCW): (x,y) -> (y, w-1-x)
+                    tx, ty = py + 10, (nw - 1 - px) + 5
+                else:
+                    tx, ty = px + 10, py + 5
+                cv2.putText(display_frame, tc(maxtemp), (int(tx), int(ty)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, black, text_shadow_thickness, cv2.LINE_AA)
+                cv2.putText(display_frame, tc(maxtemp), (int(tx), int(ty)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, textColor, 1, cv2.LINE_AA)
+
+            if mintemp < avgTemp - threshold:
+                px, py = (lrow * scale), (lcol * scale)
+                if rotate_mode == 0:
+                    tx, ty = px + 10, py + 5
+                elif rotate_mode == 180:
+                    tx, ty = (display_w - px) + 10 - nw, (display_h - py) + 5 - nh
+                elif rotate_mode == 90:
+                    tx, ty = (nh - 1 - py) + 10, px + 5
+                elif rotate_mode == 270:
+                    tx, ty = py + 10, (nw - 1 - px) + 5
+                else:
+                    tx, ty = px + 10, py + 5
+                cv2.putText(display_frame, tc(mintemp), (int(tx), int(ty)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, black, text_shadow_thickness, cv2.LINE_AA)
+                cv2.putText(display_frame, tc(mintemp), (int(tx), int(ty)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, textColor, 1, cv2.LINE_AA)
+
+        # Temperaturanzeige unten rechts (die mit dem Fadenkreuz verknüpft war) jetzt nach Rotation:
+        if display_crosshair:
+            # Text rechts unten im gedrehten Frame
+            txt = tc(temp)
+            (tw, th), _ = cv2.getTextSize(txt, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
+            cv2.putText(display_frame, txt, (display_w - tw - 5, display_h - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.45, black, text_shadow_thickness, cv2.LINE_AA)
+            cv2.putText(display_frame, txt, (display_w - tw - 5, display_h - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.45, textColor, 1, cv2.LINE_AA)
+
+        if recording:
+            cv2.putText(display_frame, "Rec: " + elapsed, (display_w - 100, 10), cv2.FONT_HERSHEY_SIMPLEX, 0.4, black, 2, cv2.LINE_AA)
+            cv2.putText(display_frame, "Rec: " + elapsed, (display_w - 100, 10), cv2.FONT_HERSHEY_SIMPLEX, 0.4, textColor, 1, cv2.LINE_AA)
+
+        # Fenstergröße ggf. aktualisieren (z. B. nach Scale-Änderung)
+        rotate_code, (display_w, display_h) = get_rotate_code_and_size()
+        if not dispFullscreen:
+            cv2.resizeWindow('Thermal', display_w, display_h)
+
+        cv2.imshow('Thermal', display_frame)
+        last_display_frame = display_frame
+
         if recording:
             elapsed = (time.time() - start)
             elapsed = time.strftime("%H:%M:%S", time.gmtime(elapsed))
-            videoOut.write(heatmap)
+            videoOut.write(display_frame)
 
         keyPress = cv2.waitKey(1)
         match keyPress:
-            # print(ord('a')) # print the keycode of desired key
-            case 97:
+            case 97:  # 'a' : scale up
                 scale += 1
                 if scale >= 5:
                     scale = 5
                 nw = width * scale
                 nh = height * scale
-                if not dispFullscreen:
-                    cv2.resizeWindow('Thermal', nw, nh)
-            case 122:
+
+            case 122:  # 'z' : scale down
                 scale -= 1
                 if scale <= 1:
                     scale = 1
                 nw = width * scale
                 nh = height * scale
-                if not dispFullscreen:
-                    cv2.resizeWindow('Thermal', nw, nh)
-            case 99:
-                if display_crosshair:
-                    display_crosshair = False
-                else:
-                    display_crosshair = True
-            case 102:
+
+            case 99:  # 'c' : crosshair
+                display_crosshair = not display_crosshair
+
+            case 102:  # 'f' : contrast up
                 alpha += 0.1
                 alpha = round(alpha, 1)
                 if alpha >= 3.0:
                     alpha = 3.0
-            case 118:
+
+            case 118:  # 'v' : contrast down
                 alpha -= 0.1
                 alpha = round(alpha, 1)
                 if alpha <= 0:
                     alpha = 0.0
-            case 104:
-                if hud:
-                    hud = False
-                elif not hud:
-                    hud = True
-            case 109:
+
+            case 104:  # 'h' : hud toggle
+                hud = not hud
+
+            case 109:  # 'm' : colormap cycle
                 colormap += 1
                 if colormap == colorMapsLen:
                     colormap = 0
-            case 110:
-                color_index = color_index + 1
-                if color_index == len(colors):
-                    color_index = 0
+
+            case 110:  # 'n' : color cycle
+                color_index = (color_index + 1) % len(colors)
                 textColor = colors[color_index]
-            case 114:
+
+            case 114:  # 'r' : start recording
                 if not recording:
-                    videoOut = rec()
+                    h, w = last_display_frame.shape[:2] if last_display_frame is not None else (display_h, display_w)
+                    videoOut = rec(w, h)
                     recording = True
                     start = time.time()
-            case 116:
+
+            case 116:  # 't' : stop recording
                 recording = False
                 elapsed = "00:00:00"
-            case 112:
-                snaptime = snapshot(heatmap)
-            case 113:
+
+            case 112:  # 'p' : snapshot
+                if last_display_frame is not None:
+                    snaptime = snapshot(last_display_frame)
+
+            case 113:  # 'q' : quit
                 cv2.destroyAllWindows()
                 exit(0)
-            case 119:
-                if tempConvert:
-                    tempConvert = False
-                else:
-                    tempConvert = True
+
+            case 119:  # 'w' : temp unit toggle
+                tempConvert = not tempConvert
+
             case 81:
                 print("left arrow key pressed")
             case 84:
